@@ -88,7 +88,7 @@
     - 依次在对应的字段填入内容（未提及的不填）：
       - **名称**：Linux.DO 签到
       - **类型**：公开仓库
-      - **链接**：https://github.com/ikun5200/linuxdo-daily.git
+      - **链接**：https://github.com/doveppp/linuxdo-checkin.git
       - **分支**：main
       - **定时类型**：`crontab`
       - **定时规则**(拉取上游代码的时间，一天一次，可以自由调整频率): 0 0 * * *

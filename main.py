@@ -137,24 +137,63 @@ class LinuxDoBrowser:
         elif platform == "win32":
             platformIdentifier = "Windows NT 10.0; Win64; x64"
 
-        self.user_agent = f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+        chrome_versions = ["131.0.0.0", "132.0.0.0", "133.0.0.0"]
+        chrome_version = random.choice(chrome_versions)
+        self.user_agent = f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36"
         self.cookie_jar = CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cookie_jar))
         self.opener.addheaders = [
             ("User-Agent", self.user_agent),
-            ("Accept", "application/json, text/javascript, */*; q=0.01"),
-            ("Accept-Language", "zh-CN,zh;q=0.9"),
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"),
+            ("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
+            ("Accept-Encoding", "gzip, deflate, br"),
+            ("Connection", "keep-alive"),
+            ("Upgrade-Insecure-Requests", "1"),
+            ("Sec-Fetch-Dest", "document"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Site", "none"),
+            ("Sec-Fetch-User", "?1"),
+            ("Cache-Control", "max-age=0"),
         ]
 
     def login(self):
         logger.info(f"账户 {self.account_index} 开始登录")
+        
+        headers = {
+            "User-Agent": self.user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+        }
+        
+        req = urllib.request.Request(LOGIN_URL, headers=headers)
+        try:
+            resp = self.opener.open(req, timeout=30)
+            logger.info("访问登录页面成功")
+            time.sleep(random.uniform(1, 2))
+        except Exception as e:
+            logger.error(f"访问登录页面失败: {e}")
+            return False
+        
         logger.info("获取 CSRF token...")
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
             "X-Requested-With": "XMLHttpRequest",
             "Referer": LOGIN_URL,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
         }
         
         req = urllib.request.Request(CSRF_URL, headers=headers)
@@ -163,16 +202,27 @@ class LinuxDoBrowser:
             csrf_data = json.loads(resp.read().decode('utf-8'))
             csrf_token = csrf_data.get("csrf")
             logger.info(f"CSRF Token obtained: {csrf_token[:10]}...")
+            time.sleep(random.uniform(0.5, 1))
         except Exception as e:
             logger.error(f"获取 CSRF token 失败: {e}")
             return False
 
         logger.info("正在登录...")
-        headers.update({
-            "X-CSRF-Token": csrf_token,
+        headers = {
+            "User-Agent": self.user_agent,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "Origin": "https://linux.do",
-        })
+            "Referer": LOGIN_URL,
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": csrf_token,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
 
         data = urllib.parse.urlencode({
             "login": self.username,
