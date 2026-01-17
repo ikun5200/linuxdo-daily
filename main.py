@@ -17,7 +17,22 @@ AUTO_INSTALL_DEPS = os.environ.get("AUTO_INSTALL_DEPS", "true").strip().lower() 
     "0",
     "off",
 ]
-REQUIRED_MODULES = ["loguru", "DrissionPage", "tabulate", "curl_cffi", "bs4"]
+REQUIRED_MODULES = [
+    "loguru",
+    "DrissionPage",
+    "tabulate",
+    "curl_cffi",
+    "bs4",
+    "wcwidth",
+]
+REQUIREMENTS = [
+    "DrissionPage==4.1.0.18",
+    "wcwidth==0.2.13",
+    "tabulate==0.9.0",
+    "loguru==0.7.2",
+    "curl-cffi",
+    "bs4",
+]
 
 
 def ensure_dependencies():
@@ -34,11 +49,12 @@ def ensure_dependencies():
 
     print(f"Missing dependencies: {', '.join(missing)}")
     requirements_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
-    if not os.path.isfile(requirements_path):
+    if os.path.isfile(requirements_path):
+        cmd = [sys.executable, "-m", "pip", "install", "-r", requirements_path]
+    else:
         print(f"requirements.txt not found: {requirements_path}")
-        print("Please install dependencies manually.")
-        return False
-    cmd = [sys.executable, "-m", "pip", "install", "-r", requirements_path]
+        print("Falling back to built-in requirements list.")
+        cmd = [sys.executable, "-m", "pip", "install", *REQUIREMENTS]
     try:
         subprocess.check_call(cmd)
     except Exception as exc:
