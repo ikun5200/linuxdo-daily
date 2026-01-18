@@ -39,6 +39,17 @@ LINUXDO_ACCOUNTS="user1:pass1;user2:pass2"
 
 兼容方式：`LINUXDO_USERNAME` / `LINUXDO_PASSWORD` 支持多值（使用 `&`/`;`/`,` 或换行分隔），数量需一一对应。
 
+### 多账号 UA 配置
+
+使用 `LINUXDO_UA` 按账号顺序配置 UA，使用 `||` 或换行分隔（UA 本身包含 `;`，因此不使用分号分隔）。
+
+示例：
+```
+LINUXDO_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0||Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+```
+
+未配置或数量不足时，自动使用默认 Windows UA。
+
 ### 可选变量
 
 | 环境变量名称            | 描述                   | 示例值                                    |
@@ -50,6 +61,7 @@ LINUXDO_ACCOUNTS="user1:pass1;user2:pass2"
 | `SC3_PUSH_KEY`    | Server酱³ SendKey     | `sctpxxxxt`                             |
 | `BROWSE_ENABLED`  | 是否启用浏览帖子功能        | `true` 或 `false`，默认为 `true`           |
 | `AUTO_INSTALL_DEPS`  | 自动检测并安装依赖（需 pip） | `true` 或 `false`，默认为 `true`           |
+| `LINUXDO_UA`  | 多账号UA列表（按顺序对应）    | 见下方示例                             |
 
 ---
 

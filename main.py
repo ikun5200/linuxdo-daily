@@ -12,6 +12,7 @@ import re
 import importlib
 import subprocess
 import signal
+import json
 
 AUTO_INSTALL_DEPS = os.environ.get("AUTO_INSTALL_DEPS", "true").strip().lower() not in [
     "false",
@@ -107,6 +108,13 @@ BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in
 GOTIFY_URL = os.environ.get("GOTIFY_URL")  # Gotify 服务器地址
 GOTIFY_TOKEN = os.environ.get("GOTIFY_TOKEN")  # Gotify 应用的 API Token
 SC3_PUSH_KEY = os.environ.get("SC3_PUSH_KEY")  # Server酱³ SendKey
+LINUXDO_UA = os.environ.get("LINUXDO_UA", "")
+
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0"
+)
 
 HOME_URL = "https://linux.do/"
 LOGIN_URL = "https://linux.do/login"
@@ -127,6 +135,20 @@ def _timeout_handler(signum, frame):
 
 def split_env_list(value):
     return [item.strip() for item in re.split(r"[&;,\n]+", value) if item.strip()]
+
+
+def split_ua_list(value):
+    if not value:
+        return []
+    raw_value = value.strip()
+    if raw_value.startswith("[") and raw_value.endswith("]"):
+        try:
+            data = json.loads(raw_value)
+            if isinstance(data, list):
+                return [str(item).strip() for item in data if str(item).strip()]
+        except Exception:
+            pass
+    return [item.strip() for item in re.split(r"\n|\|\|", raw_value) if item.strip()]
 
 
 def mask_account(value):
@@ -179,19 +201,14 @@ def parse_accounts():
 
 
 class LinuxDoBrowser:
-    def __init__(self, username, password) -> None:
-        from sys import platform
-
+    def __init__(self, username, password, user_agent=None) -> None:
         self.username = username
         self.password = password
         self.display_name = mask_account(username)
+        self.custom_user_agent = user_agent
 
-        if platform == "linux" or platform == "linux2":
-            platformIdentifier = "X11; Linux x86_64"
-        elif platform == "darwin":
-            platformIdentifier = "Macintosh; Intel Mac OS X 10_15_7"
-        elif platform == "win32":
-            platformIdentifier = "Windows NT 10.0; Win64; x64"
+        browser_ua = self.custom_user_agent or DEFAULT_USER_AGENT
+        request_ua = self.custom_user_agent or DEFAULT_USER_AGENT
 
         co = (
             ChromiumOptions()
@@ -199,26 +216,28 @@ class LinuxDoBrowser:
             .incognito(True)
             .set_argument("--no-sandbox")
         )
-        co.set_user_agent(
-            f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-        )
+        co.set_user_agent(browser_ua)
         self.browser = Chromium(co)
         self.page = self.browser.new_tab()
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+                "User-Agent": request_ua,
                 "Accept": "application/json, text/javascript, */*; q=0.01",
                 "Accept-Language": "zh-CN,zh;q=0.9",
             }
         )
+        if self.custom_user_agent:
+            logger.info(f"账号 {self.display_name} 使用自定义 UA")
+        else:
+            logger.info(f"账号 {self.display_name} 使用默认 Windows UA")
 
     def login(self):
-        logger.info("开始登录")
+        logger.info(f"账号 {self.display_name} 开始登录")
         # Step 1: Get CSRF Token
         logger.info("获取 CSRF token...")
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+            "User-Agent": self.session.headers.get("User-Agent", DEFAULT_USER_AGENT),
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "Accept-Language": "zh-CN,zh;q=0.9",
             "X-Requested-With": "XMLHttpRequest",
@@ -362,6 +381,10 @@ class LinuxDoBrowser:
         timeout_seconds = int(timeout_seconds) if timeout_seconds else 0
         old_handler = None
         try:
+            logger.info(
+                f"账号 {self.display_name} 任务开始，浏览任务："
+                f"{'开启' if BROWSE_ENABLED else '关闭'}"
+            )
             if timeout_seconds > 0 and hasattr(signal, "SIGALRM"):
                 old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
                 signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
@@ -369,14 +392,18 @@ class LinuxDoBrowser:
             login_res = self.login()
             if not login_res:  # 登录
                 logger.warning("登录验证失败")
+            else:
+                logger.info("登录验证成功")
 
             if BROWSE_ENABLED:
+                logger.info("开始浏览任务")
                 click_topic_res = self.click_topic()  # 点击主题
                 if not click_topic_res:
                     logger.error("点击主题失败，程序终止")
                     return
                 logger.info("完成浏览任务")
 
+            logger.info("发送通知")
             self.send_notifications(BROWSE_ENABLED)  # 发送通知
         except AccountTimeout:
             logger.warning(
@@ -401,6 +428,7 @@ class LinuxDoBrowser:
                 self.browser.quit()
             except Exception:
                 pass
+            logger.info(f"账号 {self.display_name} 任务结束")
 
     def click_like(self, page):
         try:
@@ -491,15 +519,27 @@ if __name__ == "__main__":
     if not accounts:
         print("Please set LINUXDO_ACCOUNTS or LINUXDO_USERNAME/LINUXDO_PASSWORD")
         exit(1)
+    ua_list = split_ua_list(LINUXDO_UA)
+    if ua_list and len(ua_list) != len(accounts):
+        logger.warning(
+            f"LINUXDO_UA 数量({len(ua_list)})与账号数量({len(accounts)})不一致，"
+            "未配置的账号将使用默认 Windows UA"
+        )
     account_timeout = (
         ACCOUNT_TIMEOUT_WITH_BROWSE
         if BROWSE_ENABLED
         else ACCOUNT_TIMEOUT_NO_BROWSE
     )
     total = len(accounts)
+    logger.info(
+        f"检测到 {total} 个账号，浏览任务："
+        f"{'开启' if BROWSE_ENABLED else '关闭'}，"
+        f"单账号限时 {account_timeout // 60} 分钟"
+    )
     for idx, (username, password) in enumerate(accounts, start=1):
+        user_agent = ua_list[idx - 1] if idx - 1 < len(ua_list) else None
         logger.info(
             f"开始处理账号 {idx}/{total}: {mask_account(username)}，限时 {account_timeout // 60} 分钟"
         )
-        l = LinuxDoBrowser(username, password)
+        l = LinuxDoBrowser(username, password, user_agent=user_agent)
         l.run(account_timeout)
