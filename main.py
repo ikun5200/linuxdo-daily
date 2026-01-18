@@ -151,6 +151,21 @@ def split_ua_list(value):
     return [item.strip() for item in re.split(r"\n|\|\|", raw_value) if item.strip()]
 
 
+def parse_int_env(name, default):
+    raw_value = os.environ.get(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning(f"{name} 值无效: {raw_value}，使用默认值 {default}")
+        return default
+    if value < 0:
+        logger.warning(f"{name} 不能为负数，使用默认值 {default}")
+        return default
+    return value
+
+
 def mask_account(value):
     if not value:
         return ""
@@ -201,11 +216,12 @@ def parse_accounts():
 
 
 class LinuxDoBrowser:
-    def __init__(self, username, password, user_agent=None) -> None:
+    def __init__(self, username, password, user_agent=None, browse_max_topics=10) -> None:
         self.username = username
         self.password = password
         self.display_name = mask_account(username)
         self.custom_user_agent = user_agent
+        self.browse_max_topics = browse_max_topics
 
         browser_ua = self.custom_user_agent or DEFAULT_USER_AGENT
         request_ua = self.custom_user_agent or DEFAULT_USER_AGENT
@@ -284,8 +300,6 @@ class LinuxDoBrowser:
             logger.error(f"登录请求异常: {e}")
             return False
 
-        self.print_connect_info()  # 打印连接信息
-
         # Step 3: Pass cookies to DrissionPage
         logger.info("同步 Cookie 到 DrissionPage...")
 
@@ -329,12 +343,21 @@ class LinuxDoBrowser:
             return True
 
     def click_topic(self):
-        topic_list = self.page.ele("@id=list-area").eles(".:title")
+        list_area = self.page.ele("@id=list-area")
+        if not list_area:
+            logger.error("未找到主题列表区域")
+            return False
+        topic_list = list_area.eles(".:title")
         if not topic_list:
             logger.error("未找到主题帖")
             return False
-        logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择10个")
-        for topic in random.sample(topic_list, 10):
+        max_topics = int(self.browse_max_topics) if self.browse_max_topics else 0
+        if max_topics <= 0:
+            logger.info("浏览上限为 0，跳过浏览任务")
+            return True
+        sample_count = min(max_topics, len(topic_list))
+        logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择 {sample_count} 个")
+        for topic in random.sample(topic_list, sample_count):
             self.click_one_topic(topic.attr("href"))
         return True
 
@@ -391,20 +414,28 @@ class LinuxDoBrowser:
 
             login_res = self.login()
             if not login_res:  # 登录
-                logger.warning("登录验证失败")
+                logger.warning("登录验证失败，跳过浏览任务")
             else:
                 logger.info("登录验证成功")
 
-            if BROWSE_ENABLED:
+            browse_res = None
+            if BROWSE_ENABLED and login_res:
                 logger.info("开始浏览任务")
-                click_topic_res = self.click_topic()  # 点击主题
-                if not click_topic_res:
-                    logger.error("点击主题失败，程序终止")
-                    return
-                logger.info("完成浏览任务")
+                browse_res = self.click_topic()  # 点击主题
+                if not browse_res:
+                    logger.error("点击主题失败")
+                else:
+                    logger.info("完成浏览任务")
+
+            if login_res:
+                logger.info("输出连接信息")
+                try:
+                    self.print_connect_info()
+                except Exception as exc:
+                    logger.error(f"获取连接信息失败: {exc}")
 
             logger.info("发送通知")
-            self.send_notifications(BROWSE_ENABLED)  # 发送通知
+            self.send_notifications(login_res, browse_res)  # 发送通知
         except AccountTimeout:
             logger.warning(
                 f"账号 {self.display_name} 运行超时 {timeout_seconds} 秒，跳过后续步骤"
@@ -464,13 +495,19 @@ class LinuxDoBrowser:
                 requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
                 info.append([project, current, requirement])
 
-        print("--------------Connect Info-----------------")
+        print(f"--------------Connect Info ({self.display_name})-----------------")
         print(tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
 
-    def send_notifications(self, browse_enabled):
-        status_msg = f"账号 {self.display_name}: ✅每日登录成功"
-        if browse_enabled:
-            status_msg += " + 浏览任务完成"
+    def send_notifications(self, login_ok, browse_ok):
+        if login_ok:
+            status_msg = f"账号 {self.display_name}: ✅登录成功"
+        else:
+            status_msg = f"账号 {self.display_name}: ❌登录失败"
+        if BROWSE_ENABLED and login_ok:
+            if browse_ok:
+                status_msg += " + 浏览任务完成"
+            else:
+                status_msg += " + 浏览任务失败"
 
         if GOTIFY_URL and GOTIFY_TOKEN:
             try:
@@ -519,6 +556,7 @@ if __name__ == "__main__":
     if not accounts:
         print("Please set LINUXDO_ACCOUNTS or LINUXDO_USERNAME/LINUXDO_PASSWORD")
         exit(1)
+    browse_max_topics = parse_int_env("BROWSE_MAX_TOPICS", 10)
     ua_list = split_ua_list(LINUXDO_UA)
     logger.info(f"检测到 UA 配置数量：{len(ua_list)}")
     if ua_list and len(ua_list) != len(accounts):
@@ -537,10 +575,20 @@ if __name__ == "__main__":
         f"{'开启' if BROWSE_ENABLED else '关闭'}，"
         f"单账号限时 {account_timeout // 60} 分钟"
     )
+    if BROWSE_ENABLED:
+        logger.info(f"浏览帖子上限：{browse_max_topics} 个")
     for idx, (username, password) in enumerate(accounts, start=1):
         user_agent = ua_list[idx - 1] if idx - 1 < len(ua_list) else None
         logger.info(
             f"开始处理账号 {idx}/{total}: {mask_account(username)}，限时 {account_timeout // 60} 分钟"
         )
-        l = LinuxDoBrowser(username, password, user_agent=user_agent)
-        l.run(account_timeout)
+        try:
+            l = LinuxDoBrowser(
+                username,
+                password,
+                user_agent=user_agent,
+                browse_max_topics=browse_max_topics,
+            )
+            l.run(account_timeout)
+        except Exception:
+            logger.exception(f"账号 {mask_account(username)} 执行异常，跳过该账号")

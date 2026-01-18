@@ -62,6 +62,7 @@ LINUXDO_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 | `BROWSE_ENABLED`  | 是否启用浏览帖子功能        | `true` 或 `false`，默认为 `true`           |
 | `AUTO_INSTALL_DEPS`  | 自动检测并安装依赖（需 pip） | `true` 或 `false`，默认为 `true`           |
 | `LINUXDO_UA`  | 多账号UA列表（按顺序对应）    | 见下方示例                             |
+| `BROWSE_MAX_TOPICS` | 每账号浏览帖子上限        | `10`（测试脚本建议 `1`）                 |
 
 ---
 
