@@ -26,6 +26,7 @@
 | --- | --- | --- |
 | `BROWSE_ENABLED` | 是否启用浏览 | `true` |
 | `BROWSE_MAX_TOPICS` | 每账号浏览帖子上限 | `10` |
+| `LOGIN_RETRIES` | 登录失败重试次数 | `3` |
 | `AUTO_INSTALL_DEPS` | 自动检测并安装依赖（需要 pip） | `true` |
 | `LINUXDO_UA` | 多账号 UA 列表（按顺序对应） | 空=默认 Windows UA |
 | `GOTIFY_URL` | Gotify 服务器地址 | 空 |
