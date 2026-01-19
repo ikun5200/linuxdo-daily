@@ -123,7 +123,6 @@ CSRF_URL = "https://linux.do/session/csrf"
 
 ACCOUNT_TIMEOUT_WITH_BROWSE = 15 * 60
 ACCOUNT_TIMEOUT_NO_BROWSE = 3 * 60
-LOGIN_RETRIES = 3
 
 
 class AccountTimeout(Exception):
@@ -249,40 +248,6 @@ class LinuxDoBrowser:
         else:
             logger.info(f"账号 {self.display_name} 使用默认 Windows UA")
 
-    def _verify_session_login(self):
-        try:
-            resp = self.session.get(
-                "https://linux.do/session/current.json", impersonate="chrome136"
-            )
-            if resp.status_code != 200:
-                logger.warning(f"会话验证失败，状态码: {resp.status_code}")
-                return False
-            data = resp.json()
-            if data.get("current_user") or data.get("user"):
-                return True
-            logger.warning("会话验证失败，未检测到 current_user")
-            return False
-        except Exception as exc:
-            logger.warning(f"会话验证请求异常: {exc}")
-            return False
-
-    def _verify_page_login(self):
-        try:
-            self.page.get(HOME_URL)
-            for attempt in range(3):
-                time.sleep(2)
-                user_ele = self.page.ele("@id=current-user")
-                if user_ele:
-                    return True
-                if "avatar" in self.page.html:
-                    return True
-                if attempt == 1:
-                    self.page.refresh()
-            return False
-        except Exception as exc:
-            logger.warning(f"页面验证异常: {exc}")
-            return False
-
     def login(self):
         logger.info(f"账号 {self.display_name} 开始登录")
         # Step 1: Get CSRF Token
@@ -335,10 +300,6 @@ class LinuxDoBrowser:
             logger.error(f"登录请求异常: {e}")
             return False
 
-        session_ok = self._verify_session_login()
-        if not session_ok:
-            logger.warning("登录后会话验证失败，继续尝试页面验证")
-
         # Step 3: Pass cookies to DrissionPage
         logger.info("同步 Cookie 到 DrissionPage...")
 
@@ -350,30 +311,36 @@ class LinuxDoBrowser:
         # or convert to dict first.
         # Assuming requests behaves like requests:
 
+        cookies_dict = self.session.cookies.get_dict()
+
         dp_cookies = []
-        for cookie in self.session.cookies:
-            domain = cookie.domain or "linux.do"
+        for name, value in cookies_dict.items():
             dp_cookies.append(
                 {
-                    "name": cookie.name,
-                    "value": cookie.value,
-                    "domain": domain,
-                    "path": cookie.path or "/",
+                    "name": name,
+                    "value": value,
+                    "domain": ".linux.do",
+                    "path": "/",
                 }
             )
 
         self.page.set.cookies(dp_cookies)
 
-        logger.info("Cookie 设置完成，开始页面验证...")
-        page_ok = self._verify_page_login()
-        if page_ok:
+        logger.info("Cookie 设置完成，导航至 linux.do...")
+        self.page.get(HOME_URL)
+
+        time.sleep(5)
+        user_ele = self.page.ele("@id=current-user")
+        if not user_ele:
+            # Fallback check for avatar
+            if "avatar" in self.page.html:
+                logger.info("登录验证成功 (通过 avatar)")
+                return True
+            logger.error("登录验证失败 (未找到 current-user)")
+            return False
+        else:
             logger.info("登录验证成功")
             return True
-        if session_ok:
-            logger.warning("页面未检测到登录状态，但会话验证成功")
-            return True
-        logger.error("登录验证失败 (未检测到登录状态)")
-        return False
 
     def click_topic(self):
         list_area = self.page.ele("@id=list-area")
@@ -445,19 +412,11 @@ class LinuxDoBrowser:
                 old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
                 signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
 
-            login_res = False
-            for attempt in range(1, LOGIN_RETRIES + 1):
-                login_res = self.login()
-                if login_res:
-                    break
-                if attempt < LOGIN_RETRIES:
-                    wait_time = random.uniform(2, 4)
-                    logger.warning(
-                        f"登录验证失败，{wait_time:.1f} 秒后重试 ({attempt}/{LOGIN_RETRIES})"
-                    )
-                    time.sleep(wait_time)
-            if not login_res:
+            login_res = self.login()
+            if not login_res:  # 登录
                 logger.warning("登录验证失败，跳过浏览任务")
+            else:
+                logger.info("登录验证成功")
 
             browse_res = None
             if BROWSE_ENABLED and login_res:
@@ -598,10 +557,6 @@ if __name__ == "__main__":
         print("Please set LINUXDO_ACCOUNTS or LINUXDO_USERNAME/LINUXDO_PASSWORD")
         exit(1)
     browse_max_topics = parse_int_env("BROWSE_MAX_TOPICS", 10)
-    login_retries = parse_int_env("LOGIN_RETRIES", 3)
-    if login_retries < 1:
-        logger.warning("LOGIN_RETRIES 小于 1，已重置为 1")
-        login_retries = 1
     ua_list = split_ua_list(LINUXDO_UA)
     logger.info(f"检测到 UA 配置数量：{len(ua_list)}")
     if ua_list and len(ua_list) != len(accounts):
@@ -620,10 +575,8 @@ if __name__ == "__main__":
         f"{'开启' if BROWSE_ENABLED else '关闭'}，"
         f"单账号限时 {account_timeout // 60} 分钟"
     )
-    logger.info(f"登录失败重试次数：{login_retries}")
     if BROWSE_ENABLED:
         logger.info(f"浏览帖子上限：{browse_max_topics} 个")
-    LOGIN_RETRIES = login_retries
     for idx, (username, password) in enumerate(accounts, start=1):
         user_agent = ua_list[idx - 1] if idx - 1 < len(ua_list) else None
         logger.info(
